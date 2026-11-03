@@ -1,0 +1,30 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Pytest / test caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments
+.env
+venv/
+env/
+ENV/
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Virtual filesystem sandbox dummy data (auto-generated at runtime by app.py)
+virtual_filesystem/
+demo_data/
+
+# Scan history snapshots (generated dynamically during scans)
+history/*.json
+!history/.gitkeep
+
+# Logs
+*.log

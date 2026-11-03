@@ -1,0 +1,2440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Disk Space and Large-File Cleanup Advisor</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --safe-bg: #dcfce7;
+      --safe-text: #166534;
+      --review-bg: #fef3c7;
+      --review-text: #92400e;
+      --protected-bg: #fee2e2;
+      --protected-text: #991b1b;
+      --banner-bg: #eff6ff;
+      --banner-border: #bfdbfe;
+      --banner-text: #1e40af;
+      --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    }
+
+    [data-theme="dark"] {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: #334155;
+      --primary: #3b82f6;
+      --primary-hover: #60a5fa;
+      --safe-bg: #064e3b;
+      --safe-text: #a7f3d0;
+      --review-bg: #78350f;
+      --review-text: #fde68a;
+      --protected-bg: #7f1d1d;
+      --protected-text: #fecaca;
+      --banner-bg: #1e3a8a;
+      --banner-border: #1d4ed8;
+      --banner-text: #bfdbfe;
+      --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding-bottom: 80px;
+      transition: background 0.2s ease, color 0.2s ease;
+    }
+
+    header {
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand h1 { font-size: 1.25rem; font-weight: 700; }
+    .brand span { font-size: 0.85rem; color: var(--text-muted); }
+
+    .header-actions { display: flex; gap: 10px; align-items: center; }
+    .theme-toggle-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+
+    .container { max-width: 1320px; margin: 20px auto; padding: 0 16px; }
+
+    /* Alert and Safety Banners */
+    .safety-banner {
+      background: var(--banner-bg);
+      border: 1px solid var(--banner-border);
+      color: var(--banner-text);
+      border-radius: 8px;
+      padding: 12px 18px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 600;
+      font-size: 0.92rem;
+    }
+    .high-disk-alert {
+      display: none;
+      background: #ef4444;
+      color: white;
+      border-radius: 8px;
+      padding: 12px 18px;
+      margin-bottom: 16px;
+      font-weight: bold;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* Grids */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 20px; }
+    .grid-5 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 20px; }
+
+    @media (max-width: 880px) {
+      .grid-2 { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
+    .card-title {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* Form Controls */
+    .form-group { margin-bottom: 12px; }
+    .form-group label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 4px; color: var(--text-muted); }
+    .form-control {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 0.9rem;
+    }
+
+    .btn {
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.88rem;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: background 0.15s ease;
+    }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-secondary { background: var(--border); color: var(--text); }
+    .btn-secondary:hover { opacity: 0.85; }
+    .btn-danger { background: #ef4444; color: white; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-demo { background: #10b981; color: white; }
+    .btn-demo:hover { background: #059669; }
+
+    /* Live Progress Card */
+    #progressBox {
+      display: none;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .progress-bar-bg {
+      background: var(--border);
+      height: 10px;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-top: 10px;
+      position: relative;
+    }
+    .progress-bar-fill {
+      background: var(--primary);
+      height: 100%;
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+    .progress-bar-indeterminate {
+      position: absolute;
+      width: 40%;
+      height: 100%;
+      background: var(--primary);
+      animation: progress-indet 1.5s infinite linear;
+    }
+    @keyframes progress-indet {
+      0% { left: -40%; }
+      100% { left: 100%; }
+    }
+
+    /* Health Gauge Card */
+    .health-gauge-container {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+    .gauge-circle {
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      border: 6px solid #10b981;
+      font-weight: 800;
+      font-size: 1.5rem;
+      flex-shrink: 0;
+    }
+    .gauge-circle span { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
+
+    /* Tabs */
+    .tabs-nav {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      gap: 6px;
+      margin-bottom: 16px;
+      overflow-x: auto;
+    }
+    .tab-btn {
+      padding: 10px 16px;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-muted);
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.9rem;
+      white-space: nowrap;
+    }
+    .tab-btn.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+    }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+
+    /* Tables */
+    .table-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .advanced-filters-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+      background: var(--bg);
+      padding: 10px 14px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+    .filter-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.82rem;
+    }
+    .filter-item select, .filter-item input {
+      padding: 4px 8px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--card-bg);
+      color: var(--text);
+      font-size: 0.82rem;
+    }
+
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.86rem; text-align: left; }
+    th {
+      background: var(--bg);
+      padding: 9px 12px;
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      user-select: none;
+    }
+    th:hover { color: var(--primary); }
+    td { padding: 9px 12px; border-bottom: 1px solid var(--border); }
+    tr:last-child td { border-bottom: none; }
+    tr:hover { background: rgba(100, 116, 139, 0.05); cursor: pointer; }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 9999px;
+      font-size: 0.74rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .badge-safe { background: var(--safe-bg); color: var(--safe-text); }
+    .badge-review { background: var(--review-bg); color: var(--review-text); }
+    .badge-protected { background: var(--protected-bg); color: var(--protected-text); }
+
+    /* Treemap */
+    #treemapView {
+      width: 100%;
+      height: 380px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      position: relative;
+    }
+    .treemap-breadcrumbs {
+      margin-bottom: 10px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--primary);
+    }
+    .treemap-node {
+      position: absolute;
+      border: 1px solid #fff;
+      overflow: hidden;
+      padding: 4px;
+      font-size: 0.75rem;
+      color: #fff;
+      cursor: pointer;
+      box-sizing: border-box;
+      transition: opacity 0.15s ease;
+    }
+    .treemap-node:hover { opacity: 0.85; }
+
+    /* File Inspector Side Drawer */
+    #inspectorDrawer {
+      position: fixed;
+      top: 0;
+      right: -480px;
+      width: 460px;
+      height: 100vh;
+      background: var(--card-bg);
+      border-left: 2px solid var(--border);
+      box-shadow: -4px 0 16px rgba(0,0,0,0.2);
+      z-index: 100;
+      transition: right 0.25s ease;
+      display: flex;
+      flex-direction: column;
+    }
+    #inspectorDrawer.open { right: 0; }
+    .drawer-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .drawer-body {
+      padding: 20px;
+      overflow-y: auto;
+      flex: 1;
+      font-size: 0.88rem;
+    }
+    .drawer-close-btn {
+      background: none;
+      border: none;
+      font-size: 1.4rem;
+      cursor: pointer;
+      color: var(--text-muted);
+    }
+    .preview-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px;
+      font-family: monospace;
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      max-height: 200px;
+      overflow-y: auto;
+      margin-top: 10px;
+    }
+
+    /* Simulation Modal / Drawer */
+    #simModal {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(0,0,0,0.5);
+      z-index: 90;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-content {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      max-width: 620px;
+      width: 90%;
+      padding: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    /* Folder Browser Modal */
+    #folderModal, #addFileModal, #manageFilesModal {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(0,0,0,0.55);
+      z-index: 150;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(2px);
+    }
+    .folder-modal-content {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      max-width: 720px;
+      width: 95%;
+      height: 82vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3);
+      overflow: hidden;
+    }
+    .folder-modal-header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .folder-modal-body {
+      padding: 14px 18px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      gap: 10px;
+    }
+    .folder-modal-footer {
+      padding: 12px 18px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bg);
+    }
+    .quick-chips-bar {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .quick-chip {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 10px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .quick-chip:hover {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+    .browser-breadcrumbs-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg);
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      font-size: 0.84rem;
+    }
+    .folder-list-container {
+      flex: 1;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow-y: auto;
+      background: var(--card-bg);
+    }
+    .folder-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      user-select: none;
+      font-size: 0.86rem;
+      transition: background 0.1s;
+    }
+    .folder-item:last-child { border-bottom: none; }
+    .folder-item:hover { background: rgba(37, 99, 235, 0.08); }
+    .folder-item.selected { background: rgba(37, 99, 235, 0.18); font-weight: 600; }
+    .folder-item-disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Path validation badge */
+    .path-status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.8rem;
+      margin-top: 4px;
+      font-weight: 500;
+    }
+    .path-status-ok { color: #10b981; }
+    .path-status-err { color: #ef4444; }
+
+    /* Toast Notification */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #0f172a;
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      display: none;
+      z-index: 200;
+      box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3);
+    }
+    #toast.show { display: block; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--primary);">
+        <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+        <path d="M3 5V19A9 3 0 0 0 21 19V5"></path>
+        <path d="M3 12A9 3 0 0 0 21 12"></path>
+      </svg>
+      <div>
+        <h1>Disk Cleanup Advisor <span style="font-size:0.75rem; background:var(--primary); color:white; padding:2px 6px; border-radius:4px;">PRO 2.0</span></h1>
+        <span>Linux Storage Analysis, Health Assessment & Safe Proposals</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <a href="/report" target="_blank" class="btn btn-secondary" title="Printable Audit Report">🖨️ Audit Report</a>
+      <button class="theme-toggle-btn" id="themeBtn" onclick="toggleTheme()">☀️ Light</button>
+    </div>
+  </header>
+
+  <div class="container">
+
+    <!-- High Disk Warning Banner (Auto-shown if used >= 80%) -->
+    <div class="high-disk-alert" id="highDiskBanner">
+      ⚠️ CRITICAL WARNING: Disk usage is over 80%! Immediate attention recommended.
+    </div>
+
+    <!-- Safety Banner -->
+    <div class="safety-banner">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+      </svg>
+      <span>SAFETY GUARANTEE: This tool NEVER deletes, moves, or modifies any files. All actions are safe proposals for manual review only.</span>
+    </div>
+
+    <!-- Isolated Demo Sandbox Mode Banner -->
+    <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid #10b981; color: #047857; padding: 12px 18px; border-radius: 8px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-size:1.4rem;">🛡️</span>
+        <div>
+          <div style="font-weight:700; font-size:0.95rem;">Isolated Demo Sandbox Mode (Computer Privacy Protected)</div>
+          <div style="font-size:0.82rem; color:var(--text-muted);">The scanner operates strictly inside the isolated virtual filesystem (<code>./virtual_filesystem</code>). Zero personal files or directories are ever scanned or accessed.</div>
+        </div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <button type="button" class="btn btn-primary" style="font-size:0.82rem; padding:6px 12px;" onclick="openAddFileModal()">
+          ➕ Add Custom Data
+        </button>
+        <button type="button" class="btn btn-secondary" style="font-size:0.82rem; padding:6px 12px;" onclick="openManageFilesModal()">
+          📁 View Sandbox Files (<span id="sandboxFileCountBadge">--</span>)
+        </button>
+        <button type="button" class="btn btn-secondary" style="font-size:0.82rem; padding:6px 12px;" onclick="resetDemoSandbox()" title="Reset to default sample files">
+          🔄 Reset Sample Data
+        </button>
+      </div>
+    </div>
+
+    <!-- Live Scan Progress Card -->
+    <div id="progressBox">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <strong id="progStatusText">Scanning filesystem in progress...</strong>
+          <div style="font-size:0.85rem; color:var(--text-muted); margin-top:2px;" id="progFolderText">Starting traversal...</div>
+        </div>
+        <button class="btn btn-danger" onclick="cancelScan()">🛑 Cancel Scan</button>
+      </div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar-indeterminate"></div>
+      </div>
+      <div style="display:flex; justify-content:space-between; font-size:0.82rem; color:var(--text-muted); margin-top:6px;">
+        <span>Files Scanned: <strong id="progCountText">0</strong> (<span id="progBytesText">0 B</span>)</span>
+        <span>Elapsed: <strong id="progElapsedText">0.0s</strong></span>
+      </div>
+    </div>
+
+    <!-- Top Grid: Scan Form & Filesystem Health -->
+    <div class="grid-2">
+      <!-- 1. Scan Configuration -->
+      <div class="card">
+        <div class="card-title">
+          <span>Virtual Filesystem Scan</span>
+          <div style="display:flex; gap:6px;">
+            <button class="btn btn-demo" onclick="openAddFileModal()">➕ Add File</button>
+            <button class="btn btn-secondary" style="font-size:0.75rem; padding:3px 8px;" onclick="resetDemoSandbox()">🔄 Reset</button>
+          </div>
+        </div>
+        <form id="scanForm" onsubmit="handleScan(event)">
+          <div class="form-group">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <label for="scanPath" style="margin-bottom:0;">Target Directory Path</label>
+              <span style="font-size:0.75rem; color:var(--text-muted);">Root: <code id="activeSafeRootLabel">~</code></span>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <input type="text" id="scanPath" class="form-control" placeholder="/Users/username/..." oninput="onPathInputChanged()" autocomplete="off" required>
+              <button type="button" class="btn btn-secondary" onclick="openFolderBrowser()" style="flex-shrink:0;">
+                📁 Browse...
+              </button>
+            </div>
+            <!-- Live validation indicator -->
+            <div id="pathValidationStatus" class="path-status-badge path-status-ok">
+              <span>Checking path...</span>
+            </div>
+            <!-- Quick-path chips -->
+            <div class="quick-chips-bar" id="quickPathsBar" style="margin-top:6px;">
+              <!-- Populated dynamically via /api/quick-paths -->
+            </div>
+          </div>
+
+          <div class="grid-2" style="margin-bottom:0;">
+            <div class="form-group">
+              <label>Min Size: <span id="minSizeDisplay">10 MB</span></label>
+              <input type="range" id="minSizeSlider" min="1" max="500" value="10" class="form-control" style="padding:0;" oninput="updateMinSizeDisplay(this.value)" onchange="onThresholdChanged()">
+            </div>
+            <div class="form-group">
+              <label for="olderThanDays">Older Than (Days)</label>
+              <input type="number" id="olderThanDays" class="form-control" value="180" min="1" onchange="onThresholdChanged()">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="excludePaths">Exclude Directories (comma-separated)</label>
+            <input type="text" id="excludePaths" class="form-control" placeholder=".git, node_modules, .venv">
+          </div>
+
+          <div style="display:flex; gap:10px; margin-top:14px;">
+            <button type="submit" class="btn btn-primary" id="scanBtn" style="flex:1;">
+              <span id="scanBtnText">🚀 Start Safe Scan</span>
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="fetchLiveDiskUsage()">Check Disk Space</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- 2. Disk Health Score & Recommendations -->
+      <div class="card">
+        <div class="card-title">
+          <span>Storage Health Assessment</span>
+          <span id="diskUsedPctBadge" style="font-size:0.85rem; color:var(--text-muted);">--</span>
+        </div>
+        <div class="health-gauge-container">
+          <div class="gauge-circle" id="gaugeCircle">
+            <span id="healthScoreVal">--</span>
+            <span id="healthScoreStatus">WAITING</span>
+          </div>
+          <div style="flex:1; font-size:0.88rem;">
+            <p style="font-weight:600; margin-bottom:6px;">Smart Advisor Recommendations:</p>
+            <ul id="healthRecList" style="padding-left:18px; color:var(--text-muted); font-size:0.83rem;">
+              <li>Run a scan to generate actionable storage recommendations.</li>
+            </ul>
+            <div style="margin-top:10px; display:flex; gap:12px; font-size:0.8rem; color:var(--text-muted);">
+              <span>Disk: <strong id="healthDiskPct">--</strong></span>
+              <span>Inodes Used: <strong id="healthInodePct">--</strong></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Summary Metrics Cards -->
+    <div class="grid-5" id="summaryCards">
+      <div class="card">
+        <div style="font-size:0.8rem; color:var(--text-muted);">FILES SCANNED</div>
+        <div style="font-size:1.4rem; font-weight:700;" id="statFilesScanned">--</div>
+      </div>
+      <div class="card">
+        <div style="font-size:0.8rem; color:var(--text-muted);">LARGE FILES (&gt; <span id="statLargeThreshold">100MB</span>)</div>
+        <div style="font-size:1.4rem; font-weight:700;" id="statLargeFiles">--</div>
+      </div>
+      <div class="card">
+        <div style="font-size:0.8rem; color:var(--text-muted);">STALE FILES (&gt; <span id="statStaleThreshold">180d</span>)</div>
+        <div style="font-size:1.4rem; font-weight:700;" id="statStaleFiles">--</div>
+      </div>
+      <div class="card">
+        <div style="font-size:0.8rem; color:var(--text-muted);">DUPLICATE GROUPS</div>
+        <div style="font-size:1.4rem; font-weight:700;" id="statDuplicates">--</div>
+      </div>
+      <div class="card" style="border-left: 4px solid #10b981;">
+        <div style="font-size:0.8rem; color:var(--text-muted);">SAFE RECOVERABLE</div>
+        <div style="font-size:1.4rem; font-weight:700; color:#10b981;" id="statRecoverable">--</div>
+      </div>
+    </div>
+
+    <!-- Interactive Visualizations Row: Treemap & Storage Charts -->
+    <div class="grid-2">
+      <!-- Interactive Treemap -->
+      <div class="card">
+        <div class="card-title">
+          <span>Interactive Directory Treemap</span>
+          <button class="btn btn-secondary" style="padding:4px 8px; font-size:0.78rem;" onclick="resetTreemapZoom()">Zoom Out</button>
+        </div>
+        <div class="treemap-breadcrumbs" id="treemapBreadcrumb">Root</div>
+        <div id="treemapView">
+          <div style="text-align:center; padding-top:160px; color:var(--text-muted);">Perform a scan to render directory treemap hierarchy.</div>
+        </div>
+      </div>
+
+      <!-- Categories & Top Dirs Charts -->
+      <div class="card">
+        <div class="card-title">Top Directories & Category Breakdown</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; height:340px;">
+          <div>
+            <div style="font-size:0.8rem; font-weight:600; text-align:center; margin-bottom:4px;">Top Directories (MB)</div>
+            <div style="height:300px; position:relative;"><canvas id="dirsChart"></canvas></div>
+          </div>
+          <div>
+            <div style="font-size:0.8rem; font-weight:600; text-align:center; margin-bottom:4px;">By File Category</div>
+            <div style="height:300px; position:relative;"><canvas id="catChart"></canvas></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabbed Detailed Tables & New Panels -->
+    <div class="card">
+      <div class="tabs-nav">
+        <button class="tab-btn active" onclick="switchTab('proposalTab', this)">📋 Cleanup Proposal</button>
+        <button class="tab-btn" onclick="switchTab('largeTab', this)">📦 Large Files (<span id="countLargeTab">0</span>)</button>
+        <button class="tab-btn" onclick="switchTab('staleTab', this)">⏳ Stale Files (<span id="countStaleTab">0</span>)</button>
+        <button class="tab-btn" onclick="switchTab('duplicatesTab', this)">🧬 Duplicate Finder 2.0 (<span id="countDupTab">0</span>)</button>
+        <button class="tab-btn" onclick="switchTab('rulesTab', this)">⚙️ Smart Rules</button>
+        <button class="tab-btn" onclick="switchTab('commandsTab', this)">💻 Equivalent Linux Commands</button>
+        <button class="tab-btn" onclick="switchTab('historyTab', this)">📈 Scan History</button>
+      </div>
+
+      <!-- 1. Proposal Tab with Dry-Run Simulator -->
+      <div id="proposalTab" class="tab-pane active">
+        <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg); padding:10px 16px; border-radius:6px; border:1px solid var(--border); margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+          <div>
+            <span>Selected for Proposal: </span>
+            <strong style="color:var(--primary);" id="selectedSpacePill">0 B</strong>
+            <span style="font-size:0.85rem; color:var(--text-muted); margin-left:6px;">(<span id="selectedCountPill">0</span> files)</span>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-secondary" onclick="openSimulationModal()">🧪 Simulate Cleanup (Dry Run)</button>
+            <button class="btn btn-secondary" onclick="exportReport('json')">Export JSON</button>
+            <button class="btn btn-secondary" onclick="exportReport('csv')">Export CSV</button>
+            <button class="btn btn-primary" onclick="downloadCleanupScript()">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Download Script (.sh)
+            </button>
+          </div>
+        </div>
+
+        <!-- Advanced Filters Bar -->
+        <div class="advanced-filters-bar">
+          <div class="filter-item">
+            <label>Search:</label>
+            <input type="text" id="filterSearch" placeholder="Type / to focus search" onkeyup="applyAdvancedFilters()">
+          </div>
+          <div class="filter-item">
+            <label>Risk:</label>
+            <select id="filterRisk" onchange="applyAdvancedFilters()">
+              <option value="ALL">All Levels</option>
+              <option value="SAFE">SAFE Only</option>
+              <option value="REVIEW">REVIEW Only</option>
+              <option value="PROTECTED">PROTECTED Only</option>
+            </select>
+          </div>
+          <div class="filter-item">
+            <label>Category:</label>
+            <select id="filterCat" onchange="applyAdvancedFilters()">
+              <option value="ALL">All Categories</option>
+              <option value="caches">Caches</option>
+              <option value="temp">Temp</option>
+              <option value="logs">Logs</option>
+              <option value="duplicates">Duplicates</option>
+              <option value="archives">Archives</option>
+              <option value="media">Media</option>
+            </select>
+          </div>
+          <button class="btn btn-secondary" style="padding:4px 8px; font-size:0.8rem;" onclick="saveFilterPreset()">Save Preset</button>
+          <button class="btn btn-secondary" style="padding:4px 8px; font-size:0.8rem;" onclick="loadFilterPreset()">Load Preset</button>
+        </div>
+
+        <div class="table-wrap">
+          <table id="proposalTable">
+            <thead>
+              <tr>
+                <th width="35"><input type="checkbox" id="selectAllProposal" onchange="toggleSelectAllProposal(this)"></th>
+                <th width="100" onclick="sortTable('proposalTable', 1)">Risk</th>
+                <th width="100" onclick="sortTable('proposalTable', 2)">Size</th>
+                <th width="90" onclick="sortTable('proposalTable', 3)">Category</th>
+                <th onclick="sortTable('proposalTable', 4)">File Path</th>
+                <th onclick="sortTable('proposalTable', 5)">Reason & Rule</th>
+              </tr>
+            </thead>
+            <tbody id="proposalTableBody">
+              <tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:24px;">Run a scan or click 'Load Demo Data' to generate cleanup proposals.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 2. Large Files Tab -->
+      <div id="largeTab" class="tab-pane">
+        <div class="table-wrap">
+          <table id="largeTable">
+            <thead>
+              <tr>
+                <th width="120" onclick="sortTable('largeTable', 0)">Size</th>
+                <th onclick="sortTable('largeTable', 1)">File Path (Click to Inspect)</th>
+                <th width="100" onclick="sortTable('largeTable', 2)">Owner</th>
+                <th width="100" onclick="sortTable('largeTable', 3)">Permissions</th>
+                <th width="160" onclick="sortTable('largeTable', 4)">Last Modified</th>
+              </tr>
+            </thead>
+            <tbody id="largeTableBody">
+              <tr><td colspan="5" style="text-align:center; padding:20px;">No large files scanned yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 3. Stale Files Tab -->
+      <div id="staleTab" class="tab-pane">
+        <div class="table-wrap">
+          <table id="staleTable">
+            <thead>
+              <tr>
+                <th width="120" onclick="sortTable('staleTable', 0)">Size</th>
+                <th onclick="sortTable('staleTable', 1)">File Path (Click to Inspect)</th>
+                <th width="110" onclick="sortTable('staleTable', 2)">Age</th>
+                <th width="160" onclick="sortTable('staleTable', 3)">Last Modified</th>
+                <th width="100" onclick="sortTable('staleTable', 4)">Owner</th>
+              </tr>
+            </thead>
+            <tbody id="staleTableBody">
+              <tr><td colspan="5" style="text-align:center; padding:20px;">No stale files scanned yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 4. Duplicate Finder 2.0 Tab -->
+      <div id="duplicatesTab" class="tab-pane">
+        <div style="margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+          <div style="font-size:0.85rem; color:var(--text-muted);">
+            3-Stage Optimized Verification: Exact Size &rarr; 4KB Prefix Hash &rarr; Full SHA-256
+          </div>
+          <div>
+            Total Duplicate Waste: <strong id="dupTotalWasteVal" style="color:#ef4444;">0 B</strong>
+          </div>
+        </div>
+        <div id="duplicateCardsContainer">
+          <p style="text-align:center; color:var(--text-muted); padding:30px;">No duplicate groups discovered yet.</p>
+        </div>
+      </div>
+
+      <!-- 5. Smart Rules Engine Tab -->
+      <div id="rulesTab" class="tab-pane">
+        <div style="margin-bottom:12px; font-size:0.85rem; color:var(--text-muted);">
+          Enable or disable automated cleanup heuristics from <code>rules.json</code>.
+        </div>
+        <div class="table-wrap">
+          <table id="rulesTable">
+            <thead>
+              <tr>
+                <th width="60">Active</th>
+                <th width="180">Rule Name</th>
+                <th width="80">Risk</th>
+                <th width="100">Files Matched</th>
+                <th width="110">Space Matched</th>
+                <th>Rule Pattern & Explanation</th>
+              </tr>
+            </thead>
+            <tbody id="rulesTableBody">
+              <tr><td colspan="6" style="text-align:center; padding:20px;">Loading smart cleanup rules...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 6. Equivalent Linux Commands Tab -->
+      <div id="commandsTab" class="tab-pane">
+        <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">
+          Map each feature in this tool to core Linux terminal utilities (<code>df</code>, <code>du</code>, <code>find</code>, <code>sha256sum</code>). Perfect for viva presentations and terminal automation.
+        </p>
+        <div id="linuxCommandsContainer" style="display:flex; flex-direction:column; gap:14px;">
+          <p style="color:var(--text-muted);">Perform a scan to generate command examples for your path.</p>
+        </div>
+      </div>
+
+      <!-- 7. Scan History and Trend Tracking Tab -->
+      <div id="historyTab" class="tab-pane">
+        <div class="grid-2">
+          <div>
+            <div class="card-title">Storage Consumption Trend</div>
+            <div style="height:220px; position:relative;"><canvas id="historyChart"></canvas></div>
+          </div>
+          <div>
+            <div class="card-title">Differential Directory Growth (Latest vs Previous)</div>
+            <div id="historyDiffContainer" style="font-size:0.85rem;">
+              <p style="color:var(--text-muted);">At least two scans are required to compute growth differentials.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- File Inspector Side Drawer -->
+  <div id="inspectorDrawer">
+    <div class="drawer-header">
+      <div>
+        <h3 style="font-size:1.1rem; margin:0;" id="inspBasename">File Inspector</h3>
+        <span style="font-size:0.75rem; color:var(--text-muted);" id="inspFileType">Regular File</span>
+      </div>
+      <button class="drawer-close-btn" onclick="closeInspector()">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <div style="margin-bottom:12px;">
+        <span class="badge" id="inspRiskBadge">SAFE</span>
+        <div style="font-size:0.82rem; margin-top:4px; color:var(--text-muted);" id="inspRiskReason">--</div>
+      </div>
+
+      <div style="background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:10px; margin-bottom:14px;">
+        <p style="margin-bottom:4px; word-break:break-all;"><strong>Path:</strong> <code id="inspPath">--</code></p>
+        <p style="margin-bottom:4px;"><strong>Size:</strong> <span id="inspSize">--</span></p>
+        <p style="margin-bottom:4px;"><strong>Inode Number:</strong> <code id="inspInode">--</code></p>
+        <p style="margin-bottom:4px;"><strong>Hard Links Count:</strong> <span id="inspLinks">--</span></p>
+        <p style="margin-bottom:4px;"><strong>Owner / Group:</strong> <span id="inspOwner">--</span> (UID: <span id="inspUid">--</span>)</p>
+        <p style="margin-bottom:4px;"><strong>Permissions:</strong> <code id="inspPerms">--</code></p>
+        <p style="margin-bottom:4px;"><strong>Modified Time:</strong> <span id="inspMtime">--</span></p>
+        <p style="margin-bottom:4px;"><strong>Access Time:</strong> <span id="inspAtime">--</span></p>
+      </div>
+
+      <div id="inspPreviewSection">
+        <label style="font-weight:600; font-size:0.85rem;">Read-Only Text Preview (First 2 KB):</label>
+        <div class="preview-box" id="inspPreviewBox">No preview available.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Simulation Modal (Dry Run Simulator) -->
+  <div id="simModal">
+    <div class="modal-content">
+      <h2 style="font-size:1.25rem; margin-bottom:6px;">Clean-Up Simulation (Dry Run)</h2>
+      <div style="background:#fef3c7; border:1px solid #fde68a; color:#92400e; padding:8px 12px; border-radius:6px; font-size:0.82rem; margin-bottom:14px; font-weight:600;">
+        ⚠️ SIMULATION ONLY - Zero files have been modified or deleted.
+      </div>
+      <div style="display:flex; justify-content:space-between; margin-bottom:14px; font-size:0.9rem;">
+        <div>Simulated Files Cleared: <strong id="simFilesCount">0</strong></div>
+        <div>Simulated Space Freed: <strong style="color:#10b981;" id="simSpaceFreed">0 B</strong></div>
+      </div>
+      <div style="height:200px; position:relative; margin-bottom:16px;">
+        <canvas id="simChart"></canvas>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn btn-secondary" onclick="closeSimulationModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Folder Browser Modal -->
+  <div id="folderModal">
+    <div class="folder-modal-content">
+      <div class="folder-modal-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <h3 style="font-size:1.1rem; margin:0;">📁 Choose Folder to Scan</h3>
+          <span style="font-size:0.75rem; color:var(--text-muted);">(Server-side Read-Only Browser)</span>
+        </div>
+        <button class="drawer-close-btn" onclick="closeFolderBrowser()">&times;</button>
+      </div>
+
+      <div class="folder-modal-body">
+        <!-- Quick shortcuts bar -->
+        <div>
+          <label style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Shortcuts:</label>
+          <div class="quick-chips-bar" id="modalQuickChips" style="margin-top:4px;">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+
+        <!-- Navigation breadcrumb & Up button -->
+        <div class="browser-breadcrumbs-bar">
+          <button class="btn btn-secondary" id="btnBrowseUp" onclick="browseFolderUp()" style="padding:4px 10px; font-size:0.8rem;" title="Go to parent directory">
+            ⬆️ Up
+          </button>
+          <div id="browserBreadcrumbs" style="flex:1; overflow-x:auto; white-space:nowrap; font-family:monospace; font-size:0.82rem;">
+            /
+          </div>
+          <label style="font-size:0.75rem; display:flex; align-items:center; gap:4px; cursor:pointer;">
+            <input type="checkbox" id="chkShowFiles" onchange="refreshFolderBrowser()"> Show files
+          </label>
+          <label style="font-size:0.75rem; display:flex; align-items:center; gap:4px; cursor:pointer;">
+            <input type="checkbox" id="chkShowHidden" onchange="refreshFolderBrowser()"> Show hidden
+          </label>
+        </div>
+
+        <!-- Directory list -->
+        <div class="folder-list-container" id="folderList">
+          <div style="text-align:center; padding:30px; color:var(--text-muted);">Loading subdirectories...</div>
+        </div>
+      </div>
+
+      <div class="folder-modal-footer">
+        <div style="font-size:0.82rem; color:var(--text-muted); max-width:400px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+          Selected: <strong id="modalSelectedPathLabel" style="color:var(--text);">--</strong>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-secondary" onclick="closeFolderBrowser()">Cancel</button>
+          <button class="btn btn-primary" id="btnConfirmFolder" onclick="confirmFolderSelection()">
+            Select this folder
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Custom File to Sandbox Modal -->
+  <div id="addFileModal">
+    <div class="folder-modal-content" style="max-height:85vh;">
+      <div class="folder-modal-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <h3 style="font-size:1.1rem; margin:0;">➕ Add File to Virtual Sandbox</h3>
+          <span style="font-size:0.75rem; color:var(--text-muted);">(Isolated Demo Data)</span>
+        </div>
+        <button class="drawer-close-btn" onclick="closeAddFileModal()">&times;</button>
+      </div>
+
+      <div class="folder-modal-body" style="overflow-y:auto;">
+        <!-- Quick 1-Click Presets -->
+        <div>
+          <label style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Quick 1-Click Presets:</label>
+          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
+            <button type="button" class="quick-chip" onclick="applyFilePreset('iso')">📀 1.8 GB Old ISO (120d)</button>
+            <button type="button" class="quick-chip" onclick="applyFilePreset('dup_zip')">📦 800 MB Duplicate Zip</button>
+            <button type="button" class="quick-chip" onclick="applyFilePreset('log')">📜 250 MB Stale Log (95d)</button>
+            <button type="button" class="quick-chip" onclick="applyFilePreset('cache')">🗑️ 180 MB Cache Folder</button>
+            <button type="button" class="quick-chip" onclick="applyFilePreset('temp')">⚡ 120 MB Temp File (.tmp)</button>
+            <button type="button" class="quick-chip" onclick="applyFilePreset('video')">🎬 2.4 GB 4K Video (190d)</button>
+          </div>
+        </div>
+
+        <hr style="border:none; border-top:1px solid var(--border); margin:10px 0;">
+
+        <!-- Custom File Creator Form -->
+        <form id="addCustomFileForm" onsubmit="submitAddCustomFile(event)" style="display:flex; flex-direction:column; gap:12px;">
+          <div class="grid-2" style="margin-bottom:0;">
+            <div class="form-group" style="margin-bottom:0;">
+              <label for="newFileFolder">Folder in Sandbox</label>
+              <select id="newFileFolder" class="form-control" required>
+                <option value="Downloads">Downloads</option>
+                <option value="Documents">Documents</option>
+                <option value="Logs">Logs</option>
+                <option value=".cache">Cache (.cache)</option>
+                <option value="Media">Media</option>
+                <option value="Projects">Projects</option>
+                <option value="Temp">Temp</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label for="newFileName">File Name</label>
+              <input type="text" id="newFileName" class="form-control" placeholder="e.g. backup_2024.iso" required>
+            </div>
+          </div>
+
+          <div class="grid-2" style="margin-bottom:0;">
+            <div class="form-group" style="margin-bottom:0;">
+              <label for="newFileSize">File Size</label>
+              <div style="display:flex; gap:6px;">
+                <input type="number" id="newFileSize" class="form-control" value="150" min="0.01" step="any" required>
+                <select id="newFileSizeUnit" class="form-control" style="width:80px;">
+                  <option value="MB">MB</option>
+                  <option value="GB">GB</option>
+                  <option value="KB">KB</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label for="newFileAge">File Age (Days Old)</label>
+              <input type="number" id="newFileAge" class="form-control" value="120" min="0" required>
+            </div>
+          </div>
+
+          <div style="background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:10px 14px; display:flex; align-items:center; justify-content:space-between;">
+            <div>
+              <strong style="font-size:0.88rem;">Create Duplicate Copy</strong>
+              <div style="font-size:0.75rem; color:var(--text-muted);">Generates an identical duplicate copy to test Duplicate Finder 2.0</div>
+            </div>
+            <input type="checkbox" id="newFileDuplicate" style="width:18px; height:18px; cursor:pointer;">
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+            <button type="button" class="btn btn-secondary" onclick="closeAddFileModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="btnSubmitAddFile">
+              ➕ Create File & Auto-Scan
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manage Sandbox Files Modal -->
+  <div id="manageFilesModal">
+    <div class="folder-modal-content" style="max-height:85vh; max-width:850px;">
+      <div class="folder-modal-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <h3 style="font-size:1.1rem; margin:0;">📁 Sandbox Files Manager</h3>
+          <span style="font-size:0.75rem; color:var(--text-muted);">(Total: <span id="manageTotalFiles">--</span> files &bull; <span id="manageTotalBytes">--</span>)</span>
+        </div>
+        <button class="drawer-close-btn" onclick="closeManageFilesModal()">&times;</button>
+      </div>
+
+      <div class="folder-modal-body" style="overflow-y:auto;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+          <span style="font-size:0.82rem; color:var(--text-muted);">All files currently in <code>./virtual_filesystem</code>:</span>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="btn btn-primary" style="padding:3px 8px; font-size:0.75rem;" onclick="closeManageFilesModal(); openAddFileModal();">➕ Add New</button>
+            <button type="button" class="btn btn-secondary" style="padding:3px 8px; font-size:0.75rem;" onclick="resetDemoSandbox()">🔄 Reset Default</button>
+            <button type="button" class="btn btn-danger" style="padding:3px 8px; font-size:0.75rem;" onclick="clearAllDemoSandbox()">🗑️ Clear All</button>
+          </div>
+        </div>
+
+        <div style="max-height:450px; overflow-y:auto; border:1px solid var(--border); border-radius:6px;">
+          <table style="width:100%; border-collapse:collapse; font-size:0.83rem;">
+            <thead>
+              <tr style="background:var(--bg); border-bottom:1px solid var(--border); text-align:left;">
+                <th style="padding:8px 12px;">Folder</th>
+                <th style="padding:8px 12px;">File Name</th>
+                <th style="padding:8px 12px;">Size</th>
+                <th style="padding:8px 12px;">Age</th>
+                <th style="padding:8px 12px; text-align:center;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="sandboxFilesTableBody">
+              <tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-muted);">Loading sandbox files...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="folder-modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeManageFilesModal()">Close</button>
+        <button type="button" class="btn btn-primary" onclick="closeManageFilesModal(); handleScan();">
+          🚀 Run Scan on Sandbox
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Box -->
+  <div id="toast">Notification</div>
+
+  <script>
+    // State management
+    let diskChartInstance = null;
+    let dirsChartInstance = null;
+    let catChartInstance = null;
+    let historyChartInstance = null;
+    let simChartInstance = null;
+    let currentProposalData = [];
+    let currentScanData = null;
+    let treemapCurrentRoot = null;
+
+    // Toast
+    function showToast(msg) {
+      const t = document.getElementById("toast");
+      t.innerText = msg;
+      t.classList.add("show");
+      setTimeout(() => t.classList.remove("show"), 3000);
+    }
+
+    // Keyboard shortcut '/' to search
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "/" && document.activeElement.tagName !== "INPUT") {
+        e.preventDefault();
+        const searchInput = document.getElementById("filterSearch");
+        if (searchInput) searchInput.focus();
+      }
+    });
+
+    // Theme toggle
+    function toggleTheme() {
+      const current = document.documentElement.getAttribute("data-theme");
+      const next = current === "dark" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
+      document.getElementById("themeBtn").innerText = next === "dark" ? "🌙 Dark" : "☀️ Light";
+      localStorage.setItem("advisor_theme", next);
+    }
+
+    (function initTheme() {
+      const saved = localStorage.getItem("advisor_theme") || "light";
+      document.documentElement.setAttribute("data-theme", saved);
+      document.getElementById("themeBtn").innerText = saved === "dark" ? "🌙 Dark" : "☀️ Light";
+    })();
+
+    let thresholdDebounceTimer = null;
+    function onThresholdChanged() {
+      clearTimeout(thresholdDebounceTimer);
+      thresholdDebounceTimer = setTimeout(() => {
+        if (isPathValid && currentScanData) {
+          handleScan();
+        }
+      }, 350);
+    }
+
+    function updateMinSizeDisplay(val) {
+      document.getElementById("minSizeDisplay").innerText = val + " MB";
+      const thresholdLabel = document.getElementById("statLargeThreshold");
+      if (thresholdLabel) thresholdLabel.innerText = val + "MB";
+    }
+
+    function switchTab(tabId, btn) {
+      document.querySelectorAll(".tab-pane").forEach(el => el.classList.remove("active"));
+      document.querySelectorAll(".tabs-nav .tab-btn").forEach(el => el.classList.remove("active"));
+      document.getElementById(tabId).classList.add("active");
+      btn.classList.add("active");
+      if (tabId === "historyTab") loadHistoryData();
+      if (tabId === "rulesTab") loadRulesData();
+    }
+
+    function formatBytes(bytes) {
+      if (!bytes || bytes <= 0) return "0 B";
+      const units = ["B", "KB", "MB", "GB", "TB"];
+      let val = bytes;
+      let idx = 0;
+      while (val >= 1024 && idx < units.length - 1) {
+        val /= 1024;
+        idx++;
+      }
+      return (idx === 0 ? Math.round(val) : val.toFixed(2)) + " " + units[idx];
+    }
+
+    // Live Disk Usage Fetch
+    async function fetchLiveDiskUsage(path = null) {
+      const p = path || document.getElementById("scanPath").value || ".";
+      try {
+        const res = await fetch(`/api/disk-usage?path=${encodeURIComponent(p)}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to fetch disk usage");
+
+        document.getElementById("diskUsedPctBadge").innerText = `${data.used_pct}% Full`;
+        document.getElementById("healthDiskPct").innerText = `${data.used_human} / ${data.total_human} (${data.used_pct}%)`;
+        document.getElementById("healthInodePct").innerText = `${data.inode_used_pct}%`;
+
+        if (data.used_pct >= 80.0) {
+          document.getElementById("highDiskBanner").style.display = "flex";
+        } else {
+          document.getElementById("highDiskBanner").style.display = "none";
+        }
+      } catch (err) {
+        showToast(err.message);
+      }
+    }
+
+    // Live SSE Scan Progress & Scan Invocation
+    let sseSource = null;
+
+    async function handleScan(event) {
+      if (event) event.preventDefault();
+      const path = document.getElementById("scanPath").value;
+      const min_size_mb = parseFloat(document.getElementById("minSizeSlider").value);
+      const older_than_days = parseInt(document.getElementById("olderThanDays").value);
+      const excludeRaw = document.getElementById("excludePaths").value;
+      const exclude = excludeRaw.split(",").map(s => s.trim()).filter(Boolean);
+
+      const btn = document.getElementById("scanBtn");
+      const btnText = document.getElementById("scanBtnText");
+      btn.disabled = true;
+      btnText.innerText = "Scanning...";
+
+      // Visually reset metrics so the user sees a fresh scan is starting
+      document.getElementById("statFilesScanned").innerText = "...";
+      document.getElementById("statLargeFiles").innerText = "...";
+      document.getElementById("statStaleFiles").innerText = "...";
+      document.getElementById("statDuplicates").innerText = "...";
+      document.getElementById("statRecoverable").innerText = "...";
+
+      // Open SSE progress stream
+      document.getElementById("progressBox").style.display = "block";
+      document.getElementById("progFolderText").innerText = "Traversing root...";
+      if (sseSource) sseSource.close();
+      sseSource = new EventSource("/api/scan/progress");
+      sseSource.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.status === "scanning") {
+            document.getElementById("progCountText").innerText = (msg.files_scanned || 0).toLocaleString();
+            document.getElementById("progBytesText").innerText = msg.bytes_scanned_human || "0 B";
+            document.getElementById("progFolderText").innerText = msg.current_folder || "";
+            document.getElementById("progElapsedText").innerText = (msg.elapsed_seconds || 0) + "s";
+          } else if (msg.status === "completed" || msg.status === "cancelled") {
+            sseSource.close();
+          }
+        } catch (err) {}
+      };
+
+      try {
+        const res = await fetch("/api/scan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path, min_size_mb, older_than_days, exclude })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Scan failed.");
+
+        currentScanData = data;
+        populateDashboard(data);
+        await loadProposalData();
+        showToast("Scan completed successfully.");
+      } catch (err) {
+        showToast(err.message);
+      } finally {
+        if (sseSource) sseSource.close();
+        document.getElementById("progressBox").style.display = "none";
+        btn.disabled = false;
+        btnText.innerText = "🚀 Start Safe Scan";
+      }
+    }
+
+    async function cancelScan() {
+      try {
+        await fetch("/api/scan/cancel", { method: "POST" });
+        showToast("Cancellation signal transmitted.");
+      } catch (err) {}
+    }
+
+    function populateDashboard(data) {
+      // Summary numbers
+      document.getElementById("statFilesScanned").innerText = data.metrics.total_files.toLocaleString();
+      document.getElementById("statLargeThreshold").innerText = document.getElementById("minSizeSlider").value + "MB";
+      document.getElementById("statLargeFiles").innerText = data.metrics.large_files_count;
+      document.getElementById("statStaleThreshold").innerText = document.getElementById("olderThanDays").value + "d";
+      document.getElementById("statStaleFiles").innerText = data.metrics.stale_files_count;
+      document.getElementById("statDuplicates").innerText = data.metrics.duplicate_groups_count;
+      document.getElementById("statRecoverable").innerText = data.recoverable_space.safe_human;
+
+      document.getElementById("countLargeTab").innerText = data.large_files.length;
+      document.getElementById("countStaleTab").innerText = data.stale_files.length;
+      document.getElementById("countDupTab").innerText = data.duplicates.length;
+
+      // Health Score & Recommendations
+      const h = data.health_score;
+      const gCircle = document.getElementById("gaugeCircle");
+      gCircle.style.borderColor = h.color;
+      document.getElementById("healthScoreVal").innerText = h.score;
+      document.getElementById("healthScoreStatus").innerText = h.status.toUpperCase();
+      document.getElementById("healthScoreStatus").style.color = h.color;
+      document.getElementById("healthDiskPct").innerText = `${data.disk_usage.used_human} / ${data.disk_usage.total_human} (${h.used_pct}%)`;
+      document.getElementById("healthInodePct").innerText = `${h.inode_used_pct}%`;
+
+      const recList = document.getElementById("healthRecList");
+      recList.innerHTML = h.recommendations.map(r => `<li>${r}</li>`).join("");
+
+      if (h.alert_high_disk) {
+        document.getElementById("highDiskBanner").style.display = "flex";
+      } else {
+        document.getElementById("highDiskBanner").style.display = "none";
+      }
+
+      // Large Files Table
+      const lBody = document.getElementById("largeTableBody");
+      lBody.innerHTML = data.large_files.length ? data.large_files.map(f => `
+        <tr onclick="openInspector('${encodeURIComponent(f.path)}')">
+          <td><strong>${f.size_human}</strong></td>
+          <td style="word-break:break-all;"><code>${f.path}</code></td>
+          <td>${f.owner}</td>
+          <td><code>${f.permissions}</code></td>
+          <td>${f.mtime_human}</td>
+        </tr>
+      `).join("") : '<tr><td colspan="5" style="text-align:center;">No large files detected.</td></tr>';
+
+      // Stale Files Table
+      const sBody = document.getElementById("staleTableBody");
+      sBody.innerHTML = data.stale_files.length ? data.stale_files.map(f => `
+        <tr onclick="openInspector('${encodeURIComponent(f.path)}')">
+          <td><strong>${f.size_human}</strong></td>
+          <td style="word-break:break-all;"><code>${f.path}</code></td>
+          <td><span class="badge badge-review">${f.age_days}d</span></td>
+          <td>${f.mtime_human}</td>
+          <td>${f.owner}</td>
+        </tr>
+      `).join("") : '<tr><td colspan="5" style="text-align:center;">No stale files detected.</td></tr>';
+
+      // Duplicate Finder 2.0
+      renderDuplicateFinder2(data.duplicates);
+
+      // Equivalent Linux Commands
+      renderLinuxCommands(data.linux_commands);
+
+      // Charts & Treemap
+      renderDirsChart(data.top_directories);
+      renderCategoriesChart(data.categories);
+      renderTreemap(data.treemap);
+    }
+
+    // Duplicate Finder 2.0 Rendering with Keep Rules
+    function renderDuplicateFinder2(dupGroups) {
+      const container = document.getElementById("duplicateCardsContainer");
+      if (!dupGroups || !dupGroups.length) {
+        container.innerHTML = '<p style="text-align:center; color:var(--text-muted); padding:30px;">No duplicate groups discovered.</p>';
+        document.getElementById("dupTotalWasteVal").innerText = "0 B";
+        return;
+      }
+
+      let totalWaste = dupGroups.reduce((acc, g) => acc + g.wasted_bytes, 0);
+      document.getElementById("dupTotalWasteVal").innerText = formatBytes(totalWaste);
+
+      container.innerHTML = dupGroups.map((g, idx) => `
+        <div style="background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+            <div>
+              <strong>Duplicate Group #${idx + 1}</strong> &bull; Size: <strong>${g.size_human}</strong> &bull;
+              Wasted: <span style="color:#ef4444; font-weight:700;">${g.wasted_human}</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; font-size:0.82rem;">
+              <label>Auto-Select:</label>
+              <select onchange="applyDupKeepRule(${idx}, this.value)" style="padding:3px 6px; border-radius:4px; border:1px solid var(--border);">
+                <option value="keep_newest">Keep Newest</option>
+                <option value="keep_oldest">Keep Oldest</option>
+                <option value="keep_shortest">Keep Shortest Path</option>
+              </select>
+            </div>
+          </div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:6px;">SHA-256: <code>${g.sha256}</code></div>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            ${g.files.map((f, fIdx) => `
+              <div style="display:flex; align-items:center; gap:8px; font-size:0.84rem; background:var(--card-bg); padding:6px 10px; border-radius:4px; border:1px solid var(--border);" onclick="openInspector('${encodeURIComponent(f.path)}')">
+                <input type="checkbox" class="dup-candidate-check" data-group="${idx}" data-file="${encodeURIComponent(f.path)}" ${fIdx > 0 ? 'checked' : ''} onclick="event.stopPropagation()">
+                <span class="badge ${fIdx === 0 ? 'badge-safe' : 'badge-review'}">${fIdx === 0 ? 'Primary' : 'Redundant'}</span>
+                <code style="flex:1; word-break:break-all;">${f.path}</code>
+                <span style="color:var(--text-muted); font-size:0.78rem;">${f.mtime_human}</span>
+                <span style="color:var(--text-muted); font-size:0.78rem;">${f.owner}</span>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `).join("");
+    }
+
+    function applyDupKeepRule(groupIdx, rule) {
+      if (!currentScanData || !currentScanData.duplicates[groupIdx]) return;
+      const group = currentScanData.duplicates[groupIdx];
+      const files = [...group.files];
+
+      let keepIndex = 0;
+      if (rule === "keep_newest") {
+        let maxTime = -1;
+        files.forEach((f, i) => { if (f.mtime > maxTime) { maxTime = f.mtime; keepIndex = i; } });
+      } else if (rule === "keep_oldest") {
+        let minTime = Infinity;
+        files.forEach((f, i) => { if (f.mtime < minTime) { minTime = f.mtime; keepIndex = i; } });
+      } else if (rule === "keep_shortest") {
+        let minLen = Infinity;
+        files.forEach((f, i) => { if (f.path_len < minLen) { minLen = f.path_len; keepIndex = i; } });
+      }
+
+      const checkboxes = document.querySelectorAll(`.dup-candidate-check[data-group="${groupIdx}"]`);
+      checkboxes.forEach((cb, i) => {
+        cb.checked = (i !== keepIndex);
+      });
+      showToast(`Rule '${rule}' applied to group #${groupIdx + 1}`);
+    }
+
+    // Equivalent Linux Commands Panel
+    function renderLinuxCommands(cmds) {
+      const c = document.getElementById("linuxCommandsContainer");
+      if (!cmds || !cmds.length) {
+        c.innerHTML = '<p style="color:var(--text-muted);">Perform a scan to inspect command mappings.</p>';
+        return;
+      }
+      c.innerHTML = cmds.map(item => `
+        <div style="background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <strong>${item.title}</strong>
+            <span style="font-size:0.75rem; color:var(--text-muted);">${item.concept}</span>
+          </div>
+          <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:8px;">${item.explanation}</p>
+          <div style="position:relative;">
+            <pre style="background:#0f172a; color:#a7f3d0; padding:10px 12px; border-radius:6px; font-size:0.82rem; overflow-x:auto;"><code>${item.cmd}</code></pre>
+            <button class="btn btn-secondary" style="position:absolute; right:8px; top:8px; padding:3px 8px; font-size:0.75rem;" onclick="navigator.clipboard.writeText('${item.cmd.replace(/'/g, "\\'")}'); showToast('Command copied!');">Copy</button>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    // Treemap Visualization (D3.js)
+    function renderTreemap(data) {
+      const container = document.getElementById("treemapView");
+      container.innerHTML = "";
+      if (!data || !data.children || !data.children.length) {
+        container.innerHTML = '<div style="text-align:center; padding-top:160px; color:var(--text-muted);">No directory hierarchy available.</div>';
+        return;
+      }
+
+      treemapCurrentRoot = data;
+      drawTreemapD3(data);
+    }
+
+    function drawTreemapD3(nodeData) {
+      const container = document.getElementById("treemapView");
+      container.innerHTML = "";
+      const width = container.clientWidth || 600;
+      const height = container.clientHeight || 380;
+
+      document.getElementById("treemapBreadcrumb").innerText = nodeData.path || nodeData.name;
+
+      const root = d3.hierarchy(nodeData)
+        .sum(d => d.children && d.children.length ? 0 : (d.value || 0))
+        .sort((a, b) => b.value - a.value);
+
+      d3.treemap().size([width, height]).padding(2)(root);
+
+      const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
+
+      const svg = d3.select(container).append("svg")
+        .attr("width", width)
+        .attr("height", height);
+
+      const nodes = svg.selectAll("g")
+        .data(root.leaves())
+        .enter()
+        .append("g")
+        .attr("transform", d => `translate(${d.x0},${d.y0})`);
+
+      nodes.append("rect")
+        .attr("width", d => Math.max(0, d.x1 - d.x0))
+        .attr("height", d => Math.max(0, d.y1 - d.y0))
+        .attr("fill", (d, i) => colorScale(d.data.name || i))
+        .attr("rx", 3)
+        .style("cursor", "pointer")
+        .on("click", (e, d) => {
+          if (d.data.path) openInspector(encodeURIComponent(d.data.path));
+        });
+
+      nodes.append("text")
+        .attr("x", 4)
+        .attr("y", 14)
+        .text(d => (d.x1 - d.x0 > 50 && d.y1 - d.y0 > 24) ? `${d.data.name} (${formatBytes(d.data.value)})` : "")
+        .attr("font-size", "10px")
+        .attr("fill", "#fff")
+        .style("pointer-events", "none");
+    }
+
+    function resetTreemapZoom() {
+      if (treemapCurrentRoot) drawTreemapD3(treemapCurrentRoot);
+    }
+
+    // File Inspector Panel (Side Drawer)
+    async function openInspector(encodedPath) {
+      const drawer = document.getElementById("inspectorDrawer");
+      try {
+        const res = await fetch(`/api/file-inspect?path=${encodedPath}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Cannot inspect file.");
+
+        document.getElementById("inspBasename").innerText = data.basename;
+        document.getElementById("inspFileType").innerText = data.file_type;
+        document.getElementById("inspPath").innerText = data.path;
+        document.getElementById("inspSize").innerText = `${data.size_human} (${data.size_bytes.toLocaleString()} bytes)`;
+        document.getElementById("inspInode").innerText = data.inode;
+        document.getElementById("inspLinks").innerText = data.hard_links;
+        document.getElementById("inspOwner").innerText = `${data.owner}:${data.group}`;
+        document.getElementById("inspUid").innerText = data.uid;
+        document.getElementById("inspPerms").innerText = `${data.permissions_rwx} (${data.permissions_octal})`;
+        document.getElementById("inspMtime").innerText = data.mtime_human;
+        document.getElementById("inspAtime").innerText = data.atime_human;
+
+        const badge = document.getElementById("inspRiskBadge");
+        badge.innerText = data.risk_level;
+        badge.className = "badge " + (data.risk_level === "SAFE" ? "badge-safe" : (data.risk_level === "REVIEW" ? "badge-review" : "badge-protected"));
+        document.getElementById("inspRiskReason").innerText = data.risk_reason;
+
+        const pBox = document.getElementById("inspPreviewBox");
+        if (data.is_text && data.preview_text) {
+          pBox.innerText = data.preview_text;
+        } else {
+          pBox.innerText = "[Binary file or empty - read preview omitted]";
+        }
+
+        drawer.classList.add("open");
+      } catch (err) {
+        showToast(err.message);
+      }
+    }
+
+    function closeInspector() {
+      document.getElementById("inspectorDrawer").classList.remove("open");
+    }
+
+    // Rules Tab Logic
+    async function loadRulesData() {
+      try {
+        const res = await fetch("/api/rules");
+        const rules = await res.json();
+        const tbody = document.getElementById("rulesTableBody");
+        tbody.innerHTML = rules.map(r => `
+          <tr>
+            <td style="text-align:center;">
+              <input type="checkbox" ${r.enabled ? 'checked' : ''} onchange="toggleRule('${r.id}', this.checked)">
+            </td>
+            <td><strong>${r.name}</strong></td>
+            <td><span class="badge ${r.risk_level === 'SAFE' ? 'badge-safe' : 'badge-review'}">${r.risk_level}</span></td>
+            <td>${r.matched_count}</td>
+            <td><strong style="color:#10b981;">${r.matched_human}</strong></td>
+            <td><code>${r.pattern}</code> &bull; <span style="font-size:0.8rem; color:var(--text-muted);">${r.explanation}</span></td>
+          </tr>
+        `).join("");
+      } catch (err) {}
+    }
+
+    async function toggleRule(ruleId, enabled) {
+      try {
+        await fetch("/api/rules", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: ruleId, enabled: enabled })
+        });
+        showToast(`Rule updated.`);
+      } catch (err) {}
+    }
+
+    // Cleanup Simulator (Dry Run)
+    function openSimulationModal() {
+      const checks = document.querySelectorAll(".proposal-check:checked");
+      let totalFreed = 0;
+      checks.forEach(cb => { totalFreed += parseInt(cb.getAttribute("data-size") || 0); });
+
+      document.getElementById("simFilesCount").innerText = checks.length;
+      document.getElementById("simSpaceFreed").innerText = formatBytes(totalFreed);
+
+      const diskTotal = currentScanData ? currentScanData.disk_usage.total_bytes : 100;
+      const diskUsedBefore = currentScanData ? currentScanData.disk_usage.used_bytes : 50;
+      const diskUsedAfter = Math.max(0, diskUsedBefore - totalFreed);
+
+      document.getElementById("simModal").style.display = "flex";
+
+      const ctx = document.getElementById("simChart").getContext("2d");
+      if (simChartInstance) simChartInstance.destroy();
+      simChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['Before Cleanup', 'After Simulated Cleanup'],
+          datasets: [
+            {
+              label: 'Used (GB)',
+              data: [
+                Math.round(diskUsedBefore / (1024**3) * 100) / 100,
+                Math.round(diskUsedAfter / (1024**3) * 100) / 100
+              ],
+              backgroundColor: ['#ef4444', '#10b981']
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false }
+          }
+        }
+      });
+    }
+
+    function closeSimulationModal() {
+      document.getElementById("simModal").style.display = "none";
+    }
+
+    // Scan History Tab
+    async function loadHistoryData() {
+      try {
+        const res = await fetch("/api/history");
+        const data = await res.json();
+        const snapshots = data.snapshots || [];
+        if (!snapshots.length) return;
+
+        const labels = snapshots.map(s => s.date_str.split(" ")[1] || s.date_str);
+        const usedMB = snapshots.map(s => Math.round(s.disk_usage.used_bytes / (1024**2) * 10) / 10);
+
+        const ctx = document.getElementById("historyChart").getContext("2d");
+        if (historyChartInstance) historyChartInstance.destroy();
+        historyChartInstance = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Used Space (MB)',
+              data: usedMB,
+              borderColor: '#3b82f6',
+              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              fill: true,
+              tension: 0.2
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false
+          }
+        });
+
+        const diffContainer = document.getElementById("historyDiffContainer");
+        if (data.latest_diff && data.latest_diff.directory_growth) {
+          diffContainer.innerHTML = `
+            <div style="margin-bottom:8px;">Growth from <strong>${data.latest_diff.earlier_scan}</strong> to <strong>${data.latest_diff.later_scan}</strong>:</div>
+            <ul style="padding-left:18px;">
+              ${data.latest_diff.directory_growth.map(d => `
+                <li style="margin-bottom:4px;"><code>${d.path}</code>: <strong style="color:${d.growth_bytes > 0 ? '#ef4444' : '#10b981'};">${d.growth_bytes > 0 ? '+' : ''}${formatBytes(d.growth_bytes)}</strong></li>
+              `).join("")}
+            </ul>
+          `;
+        }
+      } catch (err) {}
+    }
+
+    // Filter Presets via localStorage
+    function saveFilterPreset() {
+      const preset = {
+        risk: document.getElementById("filterRisk").value,
+        cat: document.getElementById("filterCat").value,
+        search: document.getElementById("filterSearch").value
+      };
+      localStorage.setItem("advisor_filter_preset", JSON.stringify(preset));
+      showToast("Filter preset saved.");
+    }
+
+    function loadFilterPreset() {
+      const saved = localStorage.getItem("advisor_filter_preset");
+      if (!saved) { showToast("No preset found."); return; }
+      const preset = JSON.parse(saved);
+      document.getElementById("filterRisk").value = preset.risk || "ALL";
+      document.getElementById("filterCat").value = preset.cat || "ALL";
+      document.getElementById("filterSearch").value = preset.search || "";
+      applyAdvancedFilters();
+      showToast("Filter preset loaded.");
+    }
+
+    function applyAdvancedFilters() {
+      const q = document.getElementById("filterSearch").value.toLowerCase();
+      const risk = document.getElementById("filterRisk").value;
+      const cat = document.getElementById("filterCat").value;
+
+      // 1. Filter Proposal Table
+      const pRows = document.querySelectorAll("#proposalTable tbody tr");
+      pRows.forEach(r => {
+        if (r.cells.length <= 1) return;
+        const rowRisk = r.cells[1].innerText.trim();
+        const rowCat = r.cells[3].innerText.trim().toLowerCase();
+        const rowText = r.innerText.toLowerCase();
+
+        const matchQ = !q || rowText.includes(q);
+        const matchRisk = (risk === "ALL") || (rowRisk === risk);
+        const matchCat = (cat === "ALL") || (rowCat === cat.toLowerCase());
+
+        r.style.display = (matchQ && matchRisk && matchCat) ? "" : "none";
+      });
+
+      // 2. Filter Large Files Table
+      const lRows = document.querySelectorAll("#largeTable tbody tr");
+      lRows.forEach(r => {
+        if (r.cells.length <= 1) return;
+        r.style.display = (!q || r.innerText.toLowerCase().includes(q)) ? "" : "none";
+      });
+
+      // 3. Filter Stale Files Table
+      const sRows = document.querySelectorAll("#staleTable tbody tr");
+      sRows.forEach(r => {
+        if (r.cells.length <= 1) return;
+        r.style.display = (!q || r.innerText.toLowerCase().includes(q)) ? "" : "none";
+      });
+
+      // 4. Filter Duplicates
+      const dCards = document.querySelectorAll("#duplicateCardsContainer > div");
+      dCards.forEach(c => {
+        c.style.display = (!q || c.innerText.toLowerCase().includes(q)) ? "" : "none";
+      });
+
+      updateSelectedSpace();
+    }
+
+    // Proposal Table
+    async function loadProposalData() {
+      try {
+        const res = await fetch("/api/proposal");
+        const data = await res.json();
+        if (!res.ok) return;
+
+        currentProposalData = [...data.safe_items, ...data.review_items];
+        const tbody = document.getElementById("proposalTableBody");
+        if (!currentProposalData.length) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px;">No cleanup candidates found.</td></tr>';
+          updateSelectedSpace();
+          return;
+        }
+
+        tbody.innerHTML = currentProposalData.map((item, idx) => {
+          const badgeClass = item.risk === "SAFE" ? "badge-safe" : "badge-review";
+          const checked = item.risk === "SAFE" ? "checked" : "";
+          return `
+            <tr onclick="openInspector('${encodeURIComponent(item.path)}')">
+              <td onclick="event.stopPropagation()"><input type="checkbox" class="proposal-check" data-size="${item.size_bytes}" ${checked} onchange="updateSelectedSpace()"></td>
+              <td><span class="badge ${badgeClass}">${item.risk}</span></td>
+              <td><strong>${item.size_human}</strong></td>
+              <td><span style="text-transform:capitalize;">${item.category}</span></td>
+              <td style="word-break:break-all;"><code>${item.path}</code></td>
+              <td>${item.reason}</td>
+            </tr>
+          `;
+        }).join("");
+
+        updateSelectedSpace();
+      } catch (err) {}
+    }
+
+    function toggleSelectAllProposal(master) {
+      document.querySelectorAll(".proposal-check").forEach(cb => { cb.checked = master.checked; });
+      updateSelectedSpace();
+    }
+
+    function updateSelectedSpace() {
+      const checks = document.querySelectorAll(".proposal-check:checked");
+      let totalBytes = 0;
+      let count = 0;
+      checks.forEach(cb => {
+        const row = cb.closest("tr");
+        if (!row || row.style.display !== "none") {
+          totalBytes += parseInt(cb.getAttribute("data-size") || 0);
+          count++;
+        }
+      });
+      document.getElementById("selectedSpacePill").innerText = formatBytes(totalBytes);
+      document.getElementById("selectedCountPill").innerText = count;
+    }
+
+    // Chart Renderers
+    function renderDirsChart(dirs) {
+      const ctx = document.getElementById("dirsChart").getContext("2d");
+      if (dirsChartInstance) dirsChartInstance.destroy();
+      const labels = dirs.map(d => d.path.split('/').slice(-2).join('/') || d.path);
+      const dataMB = dirs.map(d => Math.round(d.size_bytes / (1024**2) * 10) / 10);
+      dirsChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{ data: dataMB, backgroundColor: '#3b82f6', borderRadius: 4 }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          indexAxis: 'y',
+          plugins: { legend: { display: false } },
+          scales: { x: { grid: { display: false } }, y: { ticks: { autoSkip: false } } }
+        }
+      });
+    }
+
+    function renderCategoriesChart(cats) {
+      const ctx = document.getElementById("catChart").getContext("2d");
+      if (catChartInstance) catChartInstance.destroy();
+      const labels = [];
+      const data = [];
+      const colors = ['#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#64748b'];
+      Object.keys(cats).forEach(key => {
+        if (cats[key].bytes > 0) {
+          labels.push(key.toUpperCase());
+          data.push(cats[key].bytes);
+        }
+      });
+      catChartInstance = new Chart(ctx, {
+        type: 'pie',
+        data: { labels: labels, datasets: [{ data: data, backgroundColor: colors.slice(0, labels.length) }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+      });
+    }
+
+    // Exports & Downloads
+    function exportReport(fmt) { window.location.href = `/api/export?format=${fmt}`; }
+    function downloadCleanupScript() { window.location.href = `/api/download-script`; }
+
+    // ==========================================
+    // Virtual Demo Sandbox & Custom File Manager
+    // ==========================================
+    function openAddFileModal() {
+      document.getElementById("addFileModal").style.display = "flex";
+    }
+
+    function closeAddFileModal() {
+      document.getElementById("addFileModal").style.display = "none";
+    }
+
+    function openManageFilesModal() {
+      document.getElementById("manageFilesModal").style.display = "flex";
+      loadSandboxFiles();
+    }
+
+    function closeManageFilesModal() {
+      document.getElementById("manageFilesModal").style.display = "none";
+    }
+
+    function applyFilePreset(presetKey) {
+      const presets = {
+        iso: { folder: "Downloads", name: "ubuntu-24.04-desktop-amd64.iso", size: 1800, unit: "MB", age: 120, dup: false },
+        dup_zip: { folder: "Documents", name: "client_assets_archive.zip", size: 800, unit: "MB", age: 90, dup: true },
+        log: { folder: "Logs", name: "nginx_access.log.1", size: 250, unit: "MB", age: 95, dup: false },
+        cache: { folder: ".cache", name: "browser_content_store.dat", size: 180, unit: "MB", age: 60, dup: false },
+        temp: { folder: "Temp", name: "heap_dump_crash_2024.tmp", size: 120, unit: "MB", age: 40, dup: false },
+        video: { folder: "Media", name: "product_launch_4k_footage.mp4", size: 2400, unit: "MB", age: 190, dup: false }
+      };
+
+      const p = presets[presetKey];
+      if (!p) return;
+      document.getElementById("newFileFolder").value = p.folder;
+      document.getElementById("newFileName").value = p.name;
+      document.getElementById("newFileSize").value = p.size;
+      document.getElementById("newFileSizeUnit").value = p.unit;
+      document.getElementById("newFileAge").value = p.age;
+      document.getElementById("newFileDuplicate").checked = p.dup;
+    }
+
+    async function submitAddCustomFile(event) {
+      if (event) event.preventDefault();
+      const folder = document.getElementById("newFileFolder").value;
+      const name = document.getElementById("newFileName").value.trim();
+      const sizeVal = parseFloat(document.getElementById("newFileSize").value);
+      const unit = document.getElementById("newFileSizeUnit").value;
+      const ageDays = parseInt(document.getElementById("newFileAge").value);
+      const isDuplicate = document.getElementById("newFileDuplicate").checked;
+
+      let size_mb = sizeVal;
+      if (unit === "GB") size_mb = sizeVal * 1024;
+      if (unit === "KB") size_mb = sizeVal / 1024;
+
+      const btn = document.getElementById("btnSubmitAddFile");
+      btn.disabled = true;
+      btn.innerText = "Creating...";
+
+      try {
+        const res = await fetch("/api/demo/add-file", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, folder, size_mb, age_days: ageDays, is_duplicate: isDuplicate })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to create file");
+
+        showToast(data.message);
+        closeAddFileModal();
+        await loadSandboxFiles();
+
+        // Auto re-scan to show the new data immediately
+        await handleScan();
+      } catch (err) {
+        showToast("Error: " + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "➕ Create File & Auto-Scan";
+      }
+    }
+
+    async function loadSandboxFiles() {
+      try {
+        const res = await fetch("/api/demo/files");
+        const data = await res.json();
+        if (!res.ok) return;
+
+        const badge = document.getElementById("sandboxFileCountBadge");
+        if (badge) badge.innerText = data.total_files;
+
+        const totalCountEl = document.getElementById("manageTotalFiles");
+        const totalSizeEl = document.getElementById("manageTotalBytes");
+        if (totalCountEl) totalCountEl.innerText = data.total_files;
+        if (totalSizeEl) totalSizeEl.innerText = data.total_human;
+
+        const tbody = document.getElementById("sandboxFilesTableBody");
+        if (!tbody) return;
+
+        if (!data.files || !data.files.length) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:30px; color:var(--text-muted);">Virtual sandbox is empty. Click "➕ Add New" to add files.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = data.files.map(f => `
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:8px 12px;"><span class="badge badge-safe">${f.folder}</span></td>
+            <td style="padding:8px 12px; font-weight:600;">${f.name}</td>
+            <td style="padding:8px 12px;"><strong>${f.size_human}</strong></td>
+            <td style="padding:8px 12px;"><span style="color:var(--text-muted);">${f.age_days} days old</span></td>
+            <td style="padding:8px 12px; text-align:center;">
+              <button type="button" class="btn btn-danger" style="padding:2px 6px; font-size:0.75rem;" onclick="deleteSandboxFile('${encodeURIComponent(f.path)}')">🗑️</button>
+            </td>
+          </tr>
+        `).join("");
+      } catch (err) {
+        console.error("Failed to load sandbox files:", err);
+      }
+    }
+
+    async function deleteSandboxFile(encodedPath) {
+      const p = decodeURIComponent(encodedPath);
+      if (!confirm(`Delete ${p.split('/').pop()} from sandbox?`)) return;
+
+      try {
+        const res = await fetch("/api/demo/file", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: p })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+
+        showToast(data.message);
+        await loadSandboxFiles();
+        await handleScan();
+      } catch (err) {
+        showToast("Error: " + err.message);
+      }
+    }
+
+    async function resetDemoSandbox() {
+      if (!confirm("Reset the virtual sandbox to default sample files?")) return;
+      try {
+        const res = await fetch("/api/demo/reset", { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+
+        showToast(data.message);
+        document.getElementById("scanPath").value = data.sandbox_path;
+        await loadSandboxFiles();
+        await handleScan();
+      } catch (err) {
+        showToast("Error: " + err.message);
+      }
+    }
+
+    async function clearAllDemoSandbox() {
+      if (!confirm("Are you sure you want to delete ALL files inside the virtual sandbox?")) return;
+      try {
+        const res = await fetch("/api/demo/clear", { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+
+        showToast(data.message);
+        await loadSandboxFiles();
+        await handleScan();
+      } catch (err) {
+        showToast("Error: " + err.message);
+      }
+    }
+
+    // Demo Data
+    async function loadDemoData() {
+      await resetDemoSandbox();
+    }
+
+    // Table sorting
+    function sortTable(tableId, colIndex) {
+      const table = document.getElementById(tableId);
+      const tbody = table.querySelector("tbody");
+      const rows = Array.from(tbody.querySelectorAll("tr"));
+      if (!rows.length || rows[0].cells.length <= 1) return;
+
+      const isAsc = table.getAttribute(`data-sort-asc-${colIndex}`) === "true";
+      rows.sort((a, b) => {
+        const aText = a.cells[colIndex].innerText.trim();
+        const bText = b.cells[colIndex].innerText.trim();
+        return isAsc ? aText.localeCompare(bText, undefined, { numeric: true }) : bText.localeCompare(aText, undefined, { numeric: true });
+      });
+      rows.forEach(r => tbody.appendChild(r));
+      table.setAttribute(`data-sort-asc-${colIndex}`, !isAsc);
+    }
+
+    // ==========================================
+    // Server-Side Folder Browser & Path Validation
+    // ==========================================
+    let browserCurrentDir = "";
+    let browserParentDir = null;
+    let browserSelectedPath = "";
+    let validationTimer = null;
+    let isPathValid = false;
+
+    // Load Quick Paths
+    async function loadQuickPaths() {
+      try {
+        const res = await fetch("/api/quick-paths");
+        const data = await res.json();
+        const bar = document.getElementById("quickPathsBar");
+        const modalChips = document.getElementById("modalQuickChips");
+
+        if (data.safe_roots && data.safe_roots.length) {
+          const rootLabel = document.getElementById("activeSafeRootLabel");
+          if (rootLabel) rootLabel.innerText = data.safe_roots[0];
+        }
+
+        if (!data.shortcuts || !data.shortcuts.length) return;
+
+        const chipsHtml = data.shortcuts.map(s => `
+          <button type="button" class="quick-chip" onclick="selectQuickPath('${encodeURIComponent(s.path)}')">
+            <span>${s.icon}</span> ${s.name}
+          </button>
+        `).join("");
+
+        if (bar) bar.innerHTML = chipsHtml;
+        if (modalChips) modalChips.innerHTML = chipsHtml;
+      } catch (err) {
+        console.error("Failed to load quick paths:", err);
+      }
+    }
+
+    async function selectQuickPath(encodedPath) {
+      const p = decodeURIComponent(encodedPath);
+      document.getElementById("scanPath").value = p;
+      closeFolderBrowser();
+      await validateCurrentPath(p);
+      if (isPathValid) {
+        handleScan();
+      }
+    }
+
+    // Debounced path validation
+    function onPathInputChanged() {
+      const p = document.getElementById("scanPath").value;
+      clearTimeout(validationTimer);
+      const statusEl = document.getElementById("pathValidationStatus");
+      statusEl.className = "path-status-badge";
+      statusEl.innerHTML = `<span style="color:var(--text-muted);">Validating...</span>`;
+      document.getElementById("scanBtn").disabled = true;
+
+      validationTimer = setTimeout(() => {
+        validateCurrentPath(p);
+      }, 350);
+    }
+
+    async function validateCurrentPath(p) {
+      const statusEl = document.getElementById("pathValidationStatus");
+      const scanBtn = document.getElementById("scanBtn");
+      const trimmed = p.trim();
+
+      if (!trimmed) {
+        statusEl.className = "path-status-badge path-status-err";
+        statusEl.innerHTML = "<span>⚠️ Path cannot be empty</span>";
+        scanBtn.disabled = true;
+        isPathValid = false;
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/validate-path?path=${encodeURIComponent(trimmed)}`);
+        const data = await res.json();
+
+        if (data.valid) {
+          statusEl.className = "path-status-badge path-status-ok";
+          statusEl.innerHTML = `<span>✓ Folder OK</span> <code style="font-size:0.75rem; color:var(--text-muted);">(${data.path})</code>`;
+          scanBtn.disabled = false;
+          isPathValid = true;
+          localStorage.setItem("advisor_last_path", data.path);
+          fetchLiveDiskUsage(data.path);
+        } else {
+          statusEl.className = "path-status-badge path-status-err";
+          statusEl.innerHTML = `<span>❌ ${data.message || data.error}</span>`;
+          scanBtn.disabled = true;
+          isPathValid = false;
+        }
+      } catch (err) {
+        statusEl.className = "path-status-badge path-status-err";
+        statusEl.innerHTML = `<span>❌ Validation error: ${err.message}</span>`;
+        scanBtn.disabled = true;
+        isPathValid = false;
+      }
+    }
+
+    // Open Folder Browser Modal
+    async function openFolderBrowser() {
+      const modal = document.getElementById("folderModal");
+      modal.style.display = "flex";
+      const currentInput = document.getElementById("scanPath").value.trim();
+      try {
+        await navigateFolder(currentInput || "");
+      } catch (e) {
+        await navigateFolder("");
+      }
+    }
+
+    function closeFolderBrowser() {
+      document.getElementById("folderModal").style.display = "none";
+    }
+
+    function refreshFolderBrowser() {
+      navigateFolder(browserCurrentDir || "");
+    }
+
+    function browseFolderUp() {
+      if (browserParentDir) {
+        navigateFolder(browserParentDir);
+      }
+    }
+
+    function formatBrowseSize(bytes) {
+      if (bytes === null || bytes === undefined) return '';
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+      if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+      return (bytes / 1073741824).toFixed(2) + ' GB';
+    }
+
+    function getFileIcon(name) {
+      const ext = name.split('.').pop().toLowerCase();
+      const icons = {
+        py: '🐍', js: '📜', html: '🌐', css: '🎨', json: '📋', md: '📝',
+        txt: '📄', log: '📃', csv: '📊', sh: '⚙️', bash: '⚙️',
+        jpg: '🖼️', jpeg: '🖼️', png: '🖼️', gif: '🖼️', svg: '🖼️', webp: '🖼️',
+        mp4: '🎬', mov: '🎬', avi: '🎬', mkv: '🎬',
+        mp3: '🎵', wav: '🎵', flac: '🎵',
+        zip: '📦', tar: '📦', gz: '📦', rar: '📦', '7z': '📦',
+        pdf: '📕', doc: '📘', docx: '📘', xls: '📗', xlsx: '📗',
+        iso: '💿', dmg: '💿', deb: '💿', rpm: '💿',
+        tmp: '🗑️', bak: '🗑️', cache: '🗑️'
+      };
+      return icons[ext] || '📄';
+    }
+
+    function openFolder(encodedPath, readable) {
+      if (!readable) {
+        showToast("Permission denied: folder cannot be opened.");
+        return;
+      }
+      navigateFolder(decodeURIComponent(encodedPath));
+    }
+
+    async function selectFolderDirectly(encodedPath, event) {
+      if (event) event.stopPropagation();
+      const p = decodeURIComponent(encodedPath);
+      document.getElementById("scanPath").value = p;
+      closeFolderBrowser();
+      await validateCurrentPath(p);
+      if (isPathValid) {
+        handleScan();
+      }
+    }
+
+    async function navigateFolder(dirPath) {
+      const listEl = document.getElementById("folderList");
+      const breadcrumbEl = document.getElementById("browserBreadcrumbs");
+      const upBtn = document.getElementById("btnBrowseUp");
+      const showHidden = document.getElementById("chkShowHidden").checked ? 1 : 0;
+      const showFiles = document.getElementById("chkShowFiles").checked ? 1 : 0;
+
+      listEl.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-muted);"><span class="spinner"></span> Reading directory...</div>';
+
+      try {
+        const res = await fetch(`/api/browse?path=${encodeURIComponent(dirPath)}&show_hidden=${showHidden}&show_files=${showFiles}`);
+        const data = await res.json();
+
+        if (!res.ok) {
+          listEl.innerHTML = `
+            <div style="text-align:center; padding:30px; color:#ef4444;">
+              <p style="margin-bottom:12px;">⚠️ ${data.error || 'Cannot read folder'}</p>
+              <button type="button" class="btn btn-secondary" onclick="navigateFolder('')">
+                🏠 Open Default Safe Folder
+              </button>
+            </div>`;
+          return;
+        }
+
+        browserCurrentDir = data.current;
+        browserParentDir = data.parent;
+        browserSelectedPath = data.current;
+
+        document.getElementById("modalSelectedPathLabel").innerText = data.current;
+        upBtn.disabled = !data.can_go_up;
+
+        // Render Breadcrumbs
+        const parts = data.current.split("/").filter(Boolean);
+        let breadcrumbHtml = `<span style="cursor:pointer; color:var(--primary);" onclick="navigateFolder('/')">/</span>`;
+        let accumulated = "";
+        for (const part of parts) {
+          accumulated += "/" + part;
+          const target = accumulated;
+          breadcrumbHtml += ` / <span style="cursor:pointer; color:var(--primary); font-weight:600;" onclick="navigateFolder('${encodeURIComponent(target)}')">${part}</span>`;
+        }
+        breadcrumbEl.innerHTML = breadcrumbHtml;
+
+        // Render Entries (directories first, then files)
+        if (!data.entries || !data.entries.length) {
+          const emptyMsg = showFiles ? 'This folder is empty.' : 'No subdirectories here. Enable "Show files" to see files.';
+          listEl.innerHTML = `<div style="text-align:center; padding:30px; color:var(--text-muted);">${emptyMsg}</div>`;
+          return;
+        }
+
+        listEl.innerHTML = data.entries.map(entry => {
+          const isReadable = entry.readable;
+          if (entry.is_dir) {
+            const countLabel = entry.file_count !== null ? `<span style="font-size:0.75rem; color:var(--text-muted); margin-right:8px;">${entry.file_count} items</span>` : '';
+            return `
+              <div class="folder-item ${!isReadable ? 'folder-item-disabled' : ''}"
+                   onclick="openFolder('${encodeURIComponent(entry.path)}', ${isReadable})"
+                   title="${entry.path}">
+                <div style="display:flex; align-items:center; gap:8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">
+                  <span style="font-size:1.1rem;">📁</span>
+                  <span style="font-weight:600; cursor:pointer; color:var(--primary);">${entry.name}</span>
+                  ${!isReadable ? '<span class="badge badge-protected" style="font-size:0.65rem;">Unreadable</span>' : ''}
+                </div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  ${countLabel}
+                  ${isReadable ? `
+                    <button type="button" class="btn btn-secondary" style="padding:2px 8px; font-size:0.75rem;"
+                            onclick="selectFolderDirectly('${encodeURIComponent(entry.path)}', event)"
+                            title="Choose this folder for scanning">
+                      Select ✓
+                    </button>
+                    <button type="button" class="btn btn-primary" style="padding:2px 8px; font-size:0.75rem;"
+                            onclick="openFolder('${encodeURIComponent(entry.path)}', true); event.stopPropagation();"
+                            title="Open and browse inside this folder">
+                      Open ➡️
+                    </button>
+                  ` : ''}
+                </div>
+              </div>
+            `;
+          } else {
+            const sizeLabel = entry.size !== null ? formatBrowseSize(entry.size) : '';
+            const icon = getFileIcon(entry.name);
+            return `
+              <div class="folder-item file-item" style="opacity:0.85; cursor:default;"
+                   title="${entry.path}">
+                <div style="display:flex; align-items:center; gap:8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">
+                  <span>${icon}</span>
+                  <span>${entry.name}</span>
+                </div>
+                <div><span style="font-size:0.75rem; color:var(--text-muted);">${sizeLabel}</span></div>
+              </div>
+            `;
+          }
+        }).join("");
+
+      } catch (err) {
+        listEl.innerHTML = `
+          <div style="text-align:center; padding:30px; color:#ef4444;">
+            <p>Failed to browse folder: ${err.message}</p>
+            <button type="button" class="btn btn-secondary" onclick="navigateFolder('')" style="margin-top:10px;">
+              🏠 Open Default Safe Folder
+            </button>
+          </div>`;
+      }
+    }
+
+    function onFolderItemClick(encodedPath, element) {
+      document.querySelectorAll(".folder-item").forEach(el => el.classList.remove("selected"));
+      if (element) element.classList.add("selected");
+      browserSelectedPath = decodeURIComponent(encodedPath);
+      document.getElementById("modalSelectedPathLabel").innerText = browserSelectedPath;
+    }
+
+    function onFolderItemDblClick(encodedPath, readable) {
+      if (!readable) {
+        showToast("Permission denied: folder cannot be opened.");
+        return;
+      }
+      navigateFolder(decodeURIComponent(encodedPath));
+    }
+
+    async function confirmFolderSelection() {
+      if (browserSelectedPath) {
+        document.getElementById("scanPath").value = browserSelectedPath;
+        closeFolderBrowser();
+        await validateCurrentPath(browserSelectedPath);
+        if (isPathValid) {
+          handleScan();
+        }
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      // 1. Load sandbox files count and list
+      await loadSandboxFiles();
+
+      // 2. Load quick shortcut paths (anchored to virtual sandbox)
+      await loadQuickPaths();
+
+      // 3. Set target directory to virtual sandbox
+      const scanInput = document.getElementById("scanPath");
+      try {
+        const res = await fetch("/api/browse");
+        const data = await res.json();
+        const startPath = data.current || data.home || "virtual_filesystem";
+        scanInput.value = startPath;
+        await validateCurrentPath(startPath);
+      } catch (e) {
+        scanInput.value = "virtual_filesystem";
+      }
+
+      // 4. Run initial scan on the virtual sandbox so all charts immediately populate!
+      await handleScan();
+
+      loadRulesData();
+    });
+  </script>
+</body>
+</html>

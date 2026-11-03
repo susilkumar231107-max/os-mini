@@ -1,0 +1,112 @@
+[
+  {
+    "id": "pycache",
+    "name": "Python Bytecode (__pycache__)",
+    "pattern": "__pycache__",
+    "is_directory": true,
+    "min_age_days": 0,
+    "risk_level": "SAFE",
+    "explanation": "Compiled Python .pyc files can always be regenerated automatically upon execution.",
+    "enabled": true
+  },
+  {
+    "id": "node_modules_old",
+    "name": "Stale Node Modules",
+    "pattern": "node_modules",
+    "is_directory": true,
+    "min_age_days": 60,
+    "risk_level": "REVIEW",
+    "explanation": "node_modules directories in projects unaccessed for over 60 days can be reinstalled with npm/yarn install.",
+    "enabled": true
+  },
+  {
+    "id": "user_cache",
+    "name": "User Application Caches",
+    "pattern": ".cache",
+    "is_directory": true,
+    "min_age_days": 14,
+    "risk_level": "SAFE",
+    "explanation": "Application cache directory containing temporary downloads and cached thumbnails.",
+    "enabled": true
+  },
+  {
+    "id": "pip_npm_cache",
+    "name": "Pip & NPM Package Caches",
+    "pattern": ".npm,.pip,.cache/pip",
+    "is_directory": true,
+    "min_age_days": 14,
+    "risk_level": "SAFE",
+    "explanation": "Package tarball caches kept by package managers.",
+    "enabled": true
+  },
+  {
+    "id": "browser_cache",
+    "name": "Browser Cache Folders",
+    "pattern": "Google/Chrome/Default/Cache,BraveSoftware/Brave-Browser/Default/Cache,Mozilla/Firefox/Profiles/*/cache2",
+    "is_directory": true,
+    "min_age_days": 7,
+    "risk_level": "SAFE",
+    "explanation": "Web browser temporary assets, cached images, and scripts.",
+    "enabled": true
+  },
+  {
+    "id": "thumbnails",
+    "name": "Desktop Image Thumbnails",
+    "pattern": ".thumbnails,thumbnails",
+    "is_directory": true,
+    "min_age_days": 14,
+    "risk_level": "SAFE",
+    "explanation": "Rendered preview thumbnails of desktop files and pictures.",
+    "enabled": true
+  },
+  {
+    "id": "tmp_files",
+    "name": "Temporary Files (*.tmp, *.temp)",
+    "pattern": "*.tmp,*.temp,*.swp,*.swo,~*",
+    "is_directory": false,
+    "min_age_days": 3,
+    "risk_level": "SAFE",
+    "explanation": "Editor swap files and process scratch files older than 3 days.",
+    "enabled": true
+  },
+  {
+    "id": "old_logs",
+    "name": "Old & Rotated Logs (*.log, *.gz)",
+    "pattern": "*.log,*.log.*,*.gz,*.1,*.old",
+    "is_directory": false,
+    "min_age_days": 30,
+    "risk_level": "SAFE",
+    "explanation": "Old application and system logs that have been rotated or inactive for 30+ days.",
+    "enabled": true
+  },
+  {
+    "id": "core_dumps",
+    "name": "Process Core Dumps",
+    "pattern": "core,core.*,*.dmp,*.crash",
+    "is_directory": false,
+    "min_age_days": 7,
+    "risk_level": "SAFE",
+    "explanation": "Memory crash dumps from terminated processes.",
+    "enabled": true
+  },
+  {
+    "id": "old_installers",
+    "name": "Old Downloads & OS Images (*.iso, *.deb, *.rpm)",
+    "pattern": "*.iso,*.img,*.deb,*.rpm,*.dmg,*.pkg",
+    "is_directory": false,
+    "min_age_days": 60,
+    "risk_level": "REVIEW",
+    "explanation": "Operating system images and software installers downloaded 60+ days ago.",
+    "enabled": true
+  },
+  {
+    "id": "stale_archives",
+    "name": "Old Compressed Archives (*.zip, *.tar.gz)",
+    "pattern": "*.zip,*.tar.gz,*.tar.bz2,*.tar.xz,*.7z",
+    "is_directory": false,
+    "min_age_days": 90,
+    "risk_level": "REVIEW",
+    "explanation": "Compressed archive files inactive for over 90 days requiring user review.",
+    "enabled": true
+  }
+]
