@@ -8,6 +8,7 @@ candidate files and directories for safe cleanup.
 import os
 import json
 import fnmatch
+import tempfile
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 
@@ -15,6 +16,13 @@ from advisor.scanner import FileMetadata
 from advisor.advisor import RiskLevel, is_protected_file
 
 DEFAULT_RULES_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "rules.json")
+
+
+def _get_active_rules_path(rules_path: str = DEFAULT_RULES_PATH) -> str:
+    tmp_rules = os.path.join(tempfile.gettempdir(), "rules.json")
+    if os.path.exists(tmp_rules):
+        return tmp_rules
+    return rules_path
 
 
 @dataclass
@@ -34,11 +42,15 @@ class Rule:
 
 def load_rules(rules_path: str = DEFAULT_RULES_PATH) -> List[Rule]:
     """Loads cleanup rules from JSON file."""
-    if not os.path.exists(rules_path):
+    active_path = _get_active_rules_path(rules_path)
+    if not os.path.exists(active_path):
         return []
-    with open(rules_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return [Rule(**item) for item in data]
+    try:
+        with open(active_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return [Rule(**item) for item in data]
+    except Exception:
+        return []
 
 
 def save_rules(rules: List[Rule], rules_path: str = DEFAULT_RULES_PATH) -> None:
@@ -56,8 +68,15 @@ def save_rules(rules: List[Rule], rules_path: str = DEFAULT_RULES_PATH) -> None:
         }
         for r in rules
     ]
-    with open(rules_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+    target_path = rules_path
+    if bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME")) or not os.access(os.path.dirname(rules_path) or ".", os.W_OK):
+        target_path = os.path.join(tempfile.gettempdir(), "rules.json")
+
+    try:
+        with open(target_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except OSError:
+        pass
 
 
 def match_file_against_rule(file_meta: FileMetadata, rule: Rule, now: float) -> bool:

@@ -7,13 +7,21 @@ Saves scan summaries in ./history/ and computes differential trends between scan
 import os
 import json
 import time
+import tempfile
 from typing import List, Dict, Any, Optional
 
-HISTORY_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "history")
+_root = os.path.dirname(os.path.dirname(__file__))
+if bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME")) or not os.access(_root, os.W_OK):
+    HISTORY_DIR = os.path.join(tempfile.gettempdir(), "history")
+else:
+    HISTORY_DIR = os.path.join(_root, "history")
 
 
 def ensure_history_dir():
-    os.makedirs(HISTORY_DIR, exist_ok=True)
+    try:
+        os.makedirs(HISTORY_DIR, exist_ok=True)
+    except OSError:
+        pass
 
 
 def save_scan_snapshot(
@@ -41,8 +49,11 @@ def save_scan_snapshot(
         "health_score": health_score,
     }
 
-    with open(snapshot_path, "w", encoding="utf-8") as f:
-        json.dump(snapshot_data, f, indent=2)
+    try:
+        with open(snapshot_path, "w", encoding="utf-8") as f:
+            json.dump(snapshot_data, f, indent=2)
+    except OSError:
+        pass
 
     return snapshot_path
 

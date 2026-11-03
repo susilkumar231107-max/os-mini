@@ -37,7 +37,8 @@ from advisor.history_manager import save_scan_snapshot, get_scan_history, comput
 from advisor.file_inspector import inspect_file
 from advisor.linux_commands import generate_equivalent_commands
 
-app = Flask(__name__)
+PROJECT_ROOT = os.path.abspath(os.path.realpath(os.path.dirname(__file__)))
+app = Flask(__name__, template_folder=os.path.join(PROJECT_ROOT, "templates"))
 
 # State cache for current scan & proposal (in-memory, single-user local dashboard)
 CURRENT_SCAN: Dict[str, Any] = {
@@ -59,9 +60,14 @@ SCAN_ACTIVE: bool = False
 
 # Configuration for allowed scan boundaries
 HOME_DIR = os.path.abspath(os.path.realpath(os.path.expanduser("~")))
-PROJECT_ROOT = os.path.abspath(os.path.realpath(os.path.dirname(__file__)))
-DEMO_DIR = os.path.join(PROJECT_ROOT, "demo_data")
-SANDBOX_DIR = os.path.join(PROJECT_ROOT, "virtual_filesystem")
+
+IS_SERVERLESS = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+if IS_SERVERLESS or not os.access(PROJECT_ROOT, os.W_OK):
+    SANDBOX_DIR = os.path.join(tempfile.gettempdir(), "virtual_filesystem")
+    DEMO_DIR = os.path.join(tempfile.gettempdir(), "demo_data")
+else:
+    SANDBOX_DIR = os.path.join(PROJECT_ROOT, "virtual_filesystem")
+    DEMO_DIR = os.path.join(PROJECT_ROOT, "demo_data")
 
 # Configurable SAFE_ROOT via environment variable (defaults to HOME_DIR)
 # Can also be a comma-separated list of allowed roots
@@ -1002,7 +1008,10 @@ def setup_default_virtual_filesystem(force_reset: bool = False):
 
 
 # Initialize virtual filesystem at import time
-setup_default_virtual_filesystem()
+try:
+    setup_default_virtual_filesystem()
+except Exception as _e:
+    logging.warning("Sandbox initialization deferred: %s", _e)
 
 
 @app.route("/api/demo/files", methods=["GET"])
